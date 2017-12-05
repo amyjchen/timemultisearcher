@@ -1,0 +1,246 @@
+<html>
+    <head>
+        <meta charset="utf-8">
+        <title> multidimensional TimeSearcher </title>
+        <script src="https://d3js.org/d3.v4.min.js"></script>
+        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
+        <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js"></script>	
+    </head>
+    <body>
+        <svg id="viz"></svg>
+        <script>
+            let wholeChart = d3.select('#viz');
+            let margin = 100;
+            let width = 800;
+            let height = 200;
+            let mapHeight = 750;
+            let outerWidth = width + 2 * margin;
+            let outerHeight = height * 3 + 4 * margin;  // changes based on num plots
+            var xScale, yScale;
+            let OHLCExtent = [[margin,margin],[width+margin,height+margin]];
+            let volumeExtent = [[margin, height + margin],[width + margin, height*2 + margin]];
+            let diffExtent = [[margin, height 
+*2 + margin*3],[width + margin, height*3 + margin*3]];
+
+            wholeChart
+                .attr('width', outerWidth)
+                .attr('height', outerHeight)
+                //.on('mousedown', startRect)
+                //.on('mousemove', adjustRect)
+                //.on('mouseup', filterLines)
+                //.on('hover', showGuides);
+        
+            d3.csv('data.csv', parseInputRow, nestData);
+            
+            function parseInputRow (d) {
+                var parseTime = d3.timeParse("%Y-%m-%d");
+                if (parseTime(d.date) < parseTime("2015-12-30")) {
+                    return;
+                }
+                return {
+                    symbol: d.symbol, 
+                    date: parseTime(d.date), 
+                    open: +d.open,
+                    close: +d.close,
+                    low: +d.low,
+                    high: +d.high,
+                    volume: +d.volume
+                };
+            }
+
+            var xScale = d3.scaleTime()
+                    .range([0, width]);
+            // CHANGE THIS TO OHLC AVG
+            var  yScaleClose = d3.scaleLinear()
+                    .range([height, 0]);
+            var  yScaleVolume = d3.scaleLinear()
+                    .range([height * 2 + margin, height + margin]);
+            // this is currently difference between high and low
+            var  yScaleHigh = d3.scaleLinear()
+                    .range([height * 3 + margin *2, height*2 + margin*2]);
+
+            function nestData(error, stockEntries) {
+                if (error) throw error;
+                xScale.domain(d3.extent(stockEntries, function (d) { return d['date']; }));
+                yScaleClose.domain(d3.extent(stockEntries, function (d) { return (d['open'] + d['high'] + d['low'] + d['close'])/4; }));
+                yScaleVolume.domain(d3.extent(stockEntries, function (d) { return d['volume']; }));
+                yScaleHigh.domain(d3.extent(stockEntries, function (d) { return d['high'] - d['low']; }));
+                var stocksByName = d3.nest()
+                    .key(function(d) { return d.symbol; })
+                    .entries(stockEntries);
+                makePlot(stocksByName);
+            }
+
+            function makePlot(stocksByName) {
+                let closePlot = wholeChart.append('g')
+                    .attr('transform', `translate(${margin},${margin})`);
+                let volumePlot = wholeChart.append('g')
+                    .attr('transform', `translate(${margin},${margin})`);
+                let highPlot = wholeChart.append('g')
+                    .attr('transform', `translate(${margin},${margin})`);
+
+                closePlot.append("g")
+                    .attr("transform", "translate(0," + height + ")")
+                    .call(d3.axisBottom(xScale))
+                    .select(".domain")
+                    .remove();
+                closePlot.append("g")
+                    .call(d3.axisLeft(yScaleClose))
+                    .append("text")
+                    .attr("fill", "#000")
+                    .attr("transform", "rotate(-90)")
+                    .attr("y", 6)
+                    .attr("dy", "0.71em")
+                    .attr("text-anchor", "end")
+                    .text("Price ($)");
+                 var closeLine = d3.line()
+                    .x(function(d) {return xScale(d.date); })
+                    .y(function(d) {return yScaleClose((d['open'] + d['high'] + d['low'] + d['close'])/4); })
+
+                volumePlot.append("g")
+                    .attr("transform", "translate(0," + (height*2 + margin) + ")")
+                    .call(d3.axisBottom(xScale))
+                    .select(".domain")
+                    .remove();
+                volumePlot.append("g")
+                    .call(d3.axisLeft(yScaleVolume))
+                    .append("text")
+                    .attr("fill", "#000")
+                .attr("transform", "translate(0," + height + ")")
+                    .attr("transform", "translate(0," + (height + margin) + ") rotate(-90) ")
+                    .attr("y", 6)
+                    .attr("dy", "0.71em")
+                    .attr("text-anchor", "end")
+                    .text("Volume (shares)");
+                var volumeLine = d3.line()
+                        .x(function(d) {return xScale(d.date); })
+                        .y(function(d) {return yScaleVolume(d.volume); })
+
+                highPlot.append("g")
+                    .attr("transform", "translate(0," + (height*3 + margin*2) + ")")
+                    .call(d3.axisBottom(xScale))
+                    .select(".domain")
+                    .remove();
+                highPlot.append("g")
+                    .call(d3.axisLeft(yScaleHigh))
+                    .append("text")
+                    .attr("fill", "#000")
+                    .attr("transform", "translate(0," + (height*2 + margin*2) + ") rotate(-90) ")
+                    .attr("y", 6)
+                    .attr("dy", "0.71em")
+                    .attr("text-anchor", "end")
+                    .text("High-low Difference ($)");
+                var highLine = d3.line()
+                        .x(function(d) {return xScale(d.date); })
+                        .y(function(d) {return yScaleHigh(d.high - d.low); })
+
+                var nstocks = stocksByName.length
+                for (var i = 0; i < nstocks; i++) {
+                    closePlot.append("path")
+                        .datum(stocksByName[i].values)
+                        .attr("fill", "none")
+                        .attr("stroke", "steelblue")
+                        .attr("stroke-linejoin", "round")
+                        .attr("stroke-linecap", "round")
+                        .attr("stroke-width", 1.5)
+                        .attr("d", closeLine);
+                    volumePlot.append("path")
+                        .datum(stocksByName[i].values)
+                        .attr("fill", "none")
+                        .attr("stroke", "magenta")
+                        .attr("stroke-linejoin", "round")
+                        .attr("stroke-linecap", "round")
+                        .attr("stroke-width", 1.5)
+                        .attr("d", volumeLine);
+                    highPlot.append("path")
+                        .datum(stocksByName[i].values)
+                        .attr("fill", "none")
+                        .attr("stroke", "orange")
+                        .attr("stroke-linejoin", "round")
+                        .attr("stroke-linecap", "round")
+                        .attr("stroke-width", 1.5)
+                        .attr("d", highLine);
+                }
+            }
+            
+            var gBrushes = wholeChart.append('g')
+                .attr("class", "brushes");
+            
+            var brushes = [];
+            
+            newBrush();
+            drawBrushesAndLines();
+            
+            function newBrush() {
+                var brush = d3.brush()
+                    .on("start", brushstart)
+                    .on("brush", brushed)
+                    .on("end", brushend)
+
+                brushes.push({id: brushes.length, brush: brush});
+
+                function brushstart() {
+                    /*
+                    var s = d3.event.selection;
+                    if (!s) return;
+                    console.log(s[1], volumeExtent[0][1], volumeExtent[1][1]);
+                    if (s[0][1] >= volumeExtent[0][1] && s[1] <= volumeExtent[1][1]) {
+                        d3.select(this.parentNode).call(brush.extent(volumeExtent));
+                        console.log("volume");
+                    } else {
+                        d3.select(this.parentNode).call(brush.extent(OHLCExtent));
+                    }*/
+                };
+
+                function brushed() {
+                }
+
+                function brushend() {
+                    // Figure out if our latest brush has a selection
+                    var lastBrushID = brushes[brushes.length - 1].id;
+                    var lastBrush = document.getElementById('brush-' + lastBrushID);
+                    var selection = d3.brushSelection(lastBrush);
+                    // If it does, that means we need another one
+                    if (selection && selection[0] !== selection[1]) {
+                        newBrush();
+                    }
+                    // Always draw brushes
+                    drawBrushesAndLines();
+                }
+            }   
+
+            function drawBrushesAndLines() {
+                var brushSelection = gBrushes
+                    .selectAll('.brush')
+                    .data(brushes, function (d){return d.id});	           // Set up new brushes
+                brushSelection.enter()
+                    .insert("g", '.brush')
+                    .attr('class', 'brush')
+                    .attr('id', function(brush){ return "brush-" + brush.id; })
+                    .each(function(brushObject) {
+                        brushObject.brush(d3.select(this));
+                        console.log(d3.brushSelection(brushObject))
+                        //console.log(brushObject.brush.extent()[0])
+                    });
+        
+                brushSelection
+                    .each(function (brushObject){
+                        d3.select(this)
+                            .attr('class', 'brush')
+                            .selectAll('.overlay')
+                            .style('pointer-events', function() {
+                                var brush = brushObject.brush;
+                                if (brushObject.id === brushes.length-1 && brush !== undefined) {
+                                    return 'all';
+                                } else {
+                                    return 'none';
+                                }
+                        });
+                    })
+
+                brushSelection.exit()
+                .remove();
+            }
+        </script>
+    </body>
+</html>

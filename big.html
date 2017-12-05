@@ -1,0 +1,625 @@
+<html>
+    <head>
+        <meta charset="utf-8">
+        <title> Multidimensional TimeSearcher </title>
+        <link rel="icon" href="final_logo.png">
+        <script src="https://d3js.org/d3.v4.min.js"></script>
+        <link rel="stylesheet" type="text/css" href="style.css">
+        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
+        <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js"></script>	
+    </head>
+    <body>
+        <section style="text-align: center">
+                <h2>TimeMultiSearcher</h2>
+        </section>
+        <div id="OHLC"></div>
+        <div id="Volume"></div>
+        <div id="Diff"></div>
+        <script>
+            let xmargin = 75;
+            let ymargin = 22;
+            let width = 1535;
+            //let height = 250;
+            //let height = 840;
+            let height = 4000;
+            let outerWidth = width + xmargin*2;
+            let outerHeight = height + ymargin*2;
+            var stocksByName;
+            
+            var OHLCBs = [];
+            var VolumeBs = [];
+            var DiffBs = [];  
+            
+            var OHLCfilter = [];
+            var Volumefilter = [];
+            var Difffilter = [];
+            
+            let OHLCChart = d3.select('#OHLC')
+                .append("svg")
+                    .style('background-color', 'whitesmoke')
+                    .attr('width', outerWidth)
+                    .attr('height', outerHeight)
+                .append("g")
+                    .attr('transform', `translate(${xmargin},${ymargin})`)
+            let VolumeChart = d3.select('#Volume')
+                .append("svg")
+                    .style('background-color', 'whitesmoke')
+                    .attr('width', outerWidth)
+                    .attr('height', outerHeight)
+                .append("g")
+                    .attr('transform', `translate(${xmargin},${ymargin})`);
+            let DiffChart = d3.select('#Diff')
+                .append("svg")
+                    .style('background-color', 'whitesmoke')
+                    .attr('width', outerWidth)
+                    .attr('height', outerHeight)
+                .append("g")
+                    .attr('transform', `translate(${xmargin},${ymargin})`);
+                        
+            var div = d3.select('body').append("div")	
+                .attr("class", "tooltip")				
+                .style("opacity", 0);  
+            
+            d3.csv('data.csv', parseInputRow, nestData);
+            
+            newOHLCBrush();
+            newVolumeBrush();
+            newDiffBrush();
+            
+            var xScale = d3.scaleTime()
+                    .range([0, width]);
+            // CHANGE THIS TO OHLC AVG
+            var  yScaleClose = d3.scaleLinear()
+                    .range([height, 0]);
+            var  yScaleVolume = d3.scaleLinear()
+                    .range([height, 0]);
+            // this is currently difference between high and low
+            var  yScaleHigh = d3.scaleLinear()
+                    .range([height, 0]);
+            
+            var closeLine = d3.line()
+                    .x(function(d) {return xScale(d.date); })
+                    .y(function(d) {return yScaleClose((d['open'] + d['high'] + d['low'] + d['close'])/4); })
+            var volumeLine = d3.line()
+                        .x(function(d) {return xScale(d.date); })
+                        .y(function(d) {return yScaleVolume(d.volume); })
+            var highLine = d3.line()
+                        .x(function(d) {return xScale(d.date); })
+                        .y(function(d) {return yScaleHigh(d.high - d.low); })
+                        
+            var OHLCGuides = OHLCChart.append('g')
+                .attr("class", "guides")
+            var OHLCBrushes = OHLCChart.append('g')
+                .attr("class", "brushes")
+            var VolumeGuides = VolumeChart.append('g')
+                .attr("class", "guides");
+            var VolumeBrushes = VolumeChart.append('g')
+                .attr("class", "brushes");
+            var DiffGuides = DiffChart.append('g')
+                .attr("class", "guides");
+            var DiffBrushes = DiffChart.append('g')
+                .attr("class", "brushes");
+            
+            
+            function parseInputRow (d) {
+                var parseTime = d3.timeParse("%Y-%m-%d");
+                if (parseTime(d.date) < parseTime("2016-5-30")) {
+                //if (parseTime(d.date) < parseTime("2015-12-30")) {
+                    return;
+                }
+                if (d.low > 500) {
+                    //console.log(d.symbol);
+                }
+                return {
+                    symbol: d.symbol, 
+                    date: parseTime(d.date), 
+                    open: +d.open,
+                    close: +d.close,
+                    low: +d.low,
+                    high: +d.high,
+                    volume: +d.volume
+                };
+            }
+            
+            function nestData(error, stockEntries) {
+                if (error) throw error;
+                xScale.domain(d3.extent(stockEntries, function (d) { return d['date']; }));
+                yScaleClose.domain(d3.extent(stockEntries, function (d) { return (d['open'] + d['high'] + d['low'] + d['close'])/4; }));
+                yScaleVolume.domain(d3.extent(stockEntries, function (d) { return d['volume']; }));
+                yScaleHigh.domain(d3.extent(stockEntries, function (d) { return d['high'] - d['low']; }));
+                stocksByName = d3.nest()
+                    .key(function(d) { return d.symbol; })
+                    .entries(stockEntries);
+                makePlot(getFilteredStocks(stocksByName));
+            }
+            
+            function getFilteredStocks() {
+                var plotGuides = [];
+                var stocks = stocksByName;
+                if (OHLCBs.length <= 1 &&  VolumeBs.length <= 1 && DiffBs.length <= 1 ) return stocks;
+                var filteredStocks = [];
+                for (var nstock = 0; nstock < stocks.length; nstock++) {
+                    var touched1 = false;
+                    var touched2 = false;
+                    var touched3 = false;
+                    var good = true;
+                    var currstock = stocks[nstock];
+                    if (DiffBs.length > 1) {
+                        for (var i = 0; i < DiffBs.length; i++) {
+                            if (document.getElementById('DiffBrush-' + i)) {
+                                var selection = d3.brushSelection(document.getElementById('DiffBrush-' + i));
+                                if (selection) {
+                                    var startdate = xScale.invert(selection[0][0]);
+                                    var enddate = xScale.invert(selection[1][0]);
+                                    var maxdiff = yScaleHigh.invert(selection[0][1]);
+                                    var mindiff = yScaleHigh.invert(selection[1][1]);
+                                    if (nstock == 0) plotGuides.push({start:startdate, end:enddate, type: "Diff"});
+                                    for (var j = 0; j < currstock.values.length; j++) {
+                                        if (currstock.values[j].date >= startdate && currstock.values[j].date <= enddate) {
+                                            touched1 = true;
+                                            if (!((currstock.values[j].high - currstock.values[j].low) >= mindiff && (currstock.values[j].high - currstock.values[j].low) <= maxdiff)) {
+                                                good = false;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } 
+                    } else {
+                        touched1 = true;
+                    }
+                    if (VolumeBs.length > 1) {
+                         for (var i = 0; i < VolumeBs.length; i++) {
+                            if (document.getElementById('VolumeBrush-' + i)) {
+                                var selection = d3.brushSelection(document.getElementById('VolumeBrush-' + i));
+                                if (selection) {
+                                    var startdate = xScale.invert(selection[0][0]);
+                                    var enddate = xScale.invert(selection[1][0]);
+                                    var maxvol = yScaleVolume.invert(selection[0][1]);
+                                    var minvol = yScaleVolume.invert(selection[1][1]);
+                                    if (nstock == 0) plotGuides.push({start:startdate, end:enddate, type: "Vol"});
+                                    for (var j = 0; j < currstock.values.length; j++) {
+                                        if (currstock.values[j].date >= startdate && currstock.values[j].date <= enddate) {
+                                            touched2 = true;
+                                            if (!((currstock.values[j].volume) >= minvol && (currstock.values[j].volume) <= maxvol)) {
+                                                good = false;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                         }
+                    } else {
+                        touched2 = true;
+                    }
+                    if (OHLCBs.length > 1) {
+                         for (var i = 0; i < OHLCBs.length; i++) {
+                            if (document.getElementById('OHLCBrush-' + i)) {
+                                var selection = d3.brushSelection(document.getElementById('OHLCBrush-' + i));
+                                if (selection) {
+                                    var startdate = xScale.invert(selection[0][0]);
+                                    var enddate = xScale.invert(selection[1][0]);
+                                    var maxOHLC = yScaleClose.invert(selection[0][1]);
+                                    var minOHLC = yScaleClose.invert(selection[1][1]);
+                                    if (nstock == 0) plotGuides.push({start:startdate, end:enddate, type: "OHLC"});
+                                    for (var j = 0; j < currstock.values.length; j++) {
+                                        if (currstock.values[j].date >= startdate && currstock.values[j].date <= enddate) {
+                                            touched3 = true;
+                                            if (!((currstock.values[j].high + currstock.values[j].low + currstock.values[j].open + currstock.values[j].close)/4 >= minOHLC && (currstock.values[j].high + currstock.values[j].low + currstock.values[j].open + currstock.values[j].close)/4 <= maxOHLC)) {
+                                                good = false;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                         }
+                    } else {
+                        touched3 = true;
+                    }
+                    if (good && touched1 && touched2 && touched3) filteredStocks.push(currstock);
+                }
+                
+                makeGuides(plotGuides); 
+                return filteredStocks;
+            }
+            
+            function makeGuides(guides) {
+                var OHLCSelection = OHLCGuides.selectAll('.rect')
+                    .data(guides);	
+                OHLCSelection.enter()
+                    .append("rect")
+                    .attr("class", 'rect');
+                d3.selectAll('.rect')
+                    .attr("x", function(d) {return xScale(d.start)})
+                    .attr("y", 0)
+                    .attr("width", function(d) {return xScale(d.end) - xScale(d.start)})
+                    .attr("height", height)
+                    .attr("opacity", 0.2)
+                    .attr("fill", function(d){
+                        if (d.type == "OHLC") {
+                            return "steelblue";
+                        } else if (d.type == "Vol") {
+                            return "magenta";
+                        } else {
+                            return "orange";
+                        }
+                    });
+                OHLCSelection.exit().remove();
+                
+                var VolumeSelection = VolumeGuides.selectAll('.rect')
+                    .data(guides);	
+                VolumeSelection.enter()
+                    .append("rect")
+                    .attr("class", 'rect');
+                d3.selectAll('.rect')
+                    .attr("x", function(d) {return xScale(d.start)})
+                    .attr("y", 0)
+                    .attr("width", function(d) {return xScale(d.end) - xScale(d.start)})
+                    .attr("height", height)
+                    .attr("opacity", 0.2)
+                    .attr("fill", function(d){
+                        if (d.type == "OHLC") {
+                            return "steelblue";
+                        } else if (d.type == "Vol") {
+                            return "magenta";
+                        } else {
+                            return "orange";
+                        }
+                    });
+                VolumeSelection.exit().remove();  
+                
+                var DiffSelection = DiffGuides.selectAll('.rect')
+                    .data(guides);	
+                DiffSelection.enter()
+                    .append("rect")
+                    .attr("class", 'rect');
+                d3.selectAll('.rect')
+                    .attr("x", function(d) {return xScale(d.start)})
+                    .attr("y", 0)
+                    .attr("width", function(d) {return xScale(d.end) - xScale(d.start)})
+                    .attr("height", height)
+                    .attr("opacity", 0.2)
+                    .attr("fill", function(d){
+                        if (d.type == "OHLC") {
+                            return "steelblue";
+                        } else if (d.type == "Vol") {
+                            return "magenta";
+                        } else {
+                            return "orange";
+                        }
+                    });
+                DiffSelection.exit().remove();                
+            }
+            
+            function makePlot(stocks) {
+                OHLCChart.append("g")
+                    .attr("transform", "translate(0," + height + ")")
+                    .call(d3.axisBottom(xScale))
+                    .select(".domain")
+                    .remove();
+                OHLCChart.append("g")
+                    .call(d3.axisLeft(yScaleClose))
+                    .append("text")
+                    .attr("fill", "#000")
+                    .attr("transform", "rotate(-90)")
+                    .attr("y", 6)
+                    .attr("dy", "0.71em")
+                    .attr("text-anchor", "end")
+                    .text("Price ($)");
+
+                VolumeChart.append("g")
+                    .attr("transform", "translate(0," + height + ")")
+                    .call(d3.axisBottom(xScale))
+                    .select(".domain")
+                    .remove();
+                VolumeChart.append("g")
+                    .call(d3.axisLeft(yScaleVolume))
+                    .append("text")
+                    .attr("fill", "#000")
+                    .attr("transform", "rotate(-90)")
+                    .attr("y", 6)
+                    .attr("dy", "0.71em")
+                    .attr("text-anchor", "end")
+                    .text("Volume (shares)");
+
+                DiffChart.append("g")
+                    .attr("transform", "translate(0," + height + ")")
+                    .call(d3.axisBottom(xScale))
+                    .select(".domain")
+                    .remove();
+                DiffChart.append("g")
+                    .call(d3.axisLeft(yScaleHigh))
+                    .append("text")
+                    .attr("fill", "#000")
+                    .attr("transform", "rotate(-90)")
+                    .attr("y", 6)
+                    .attr("dy", "0.71em")
+                    .attr("text-anchor", "end")
+                    .text("High-low Difference ($)");
+
+                renderStocks(stocks, drawBrushesAndLines);
+            }
+
+            function mouseover(d) {
+                this.parentNode.parentNode.appendChild(this.parentNode);//the path group is on the top with in its parent group
+                this.parentNode.parentNode.parentNode.appendChild(this.parentNode.parentNode);//the parent group is on the top with in its parent group
+                d3.select(this).style('stroke', 'black');
+                div.transition()		
+                    .duration(200)		
+                    .style("opacity", .9);		
+                div	.html(d[0].symbol)	
+                    .style("left", (d3.event.pageX) + "px")		
+                    .style("top", (d3.event.pageY - 28) + "px");
+            }
+            
+            function OHLCmouseout() {
+                d3.select(this).style('stroke', "steelblue");
+                div.transition()		
+                    .duration(500)		
+                    .style("opacity", 0);	
+            }
+            function Volumemouseout() {
+                d3.select(this).style('stroke', "magenta");
+                div.transition()		
+                    .duration(500)		
+                    .style("opacity", 0);	
+            }
+            function Diffmouseout() {
+                d3.select(this).style('stroke', "orange");
+                div.transition()		
+                    .duration(500)		
+                    .style("opacity", 0);	
+            }
+            
+            function renderStocks(stocks, callback) {
+                var tempstocks =  stocks.map(function(d) {
+                    return d.values;
+                });
+                
+                var OHLCstock = OHLCChart.selectAll(".OHLC-stock")
+                    .data(tempstocks);
+                var OHLCGroups = OHLCstock.enter()
+                    .append('path')
+                    .style("fill", "none")
+                    .attr("stroke-linejoin", "round")
+                    .attr("stroke-linecap", "round")
+                    .attr("stroke-width", 1.5)
+                    .attr("class","OHLC-stock")
+                    .on("mouseover", mouseover)
+                    .on("mouseout", OHLCmouseout)
+                    .on("click", function(d) {console.log(d[0].symbol)});
+                d3.selectAll('.OHLC-stock')
+                    .attr("d", closeLine)
+                    .attr("stroke", "steelblue");
+
+                var Volumestock = VolumeChart.selectAll(".Volume-stock")
+                    .data(tempstocks);
+                var VolumeGroups = Volumestock.enter()
+                    .append("path")
+                    .attr("fill", "none")
+                    .attr("stroke-linejoin", "round")
+                    .attr("stroke-linecap", "round")
+                    .attr("stroke-width", 1.5)
+                    .attr("class","Volume-stock")
+                    .on("mouseover", mouseover)
+                    .on("mouseout", Volumemouseout)
+                    .on("click", function(d) {console.log(d[0].symbol)});
+                d3.selectAll('.Volume-stock')
+                    .attr("d", volumeLine)
+                    .attr("stroke", "magenta");
+
+                var Diffstock = DiffChart.selectAll(".Diff-stock")
+                    .data(tempstocks);
+                var DiffGroups = Diffstock.enter()
+                    .append("path")
+                    .attr("fill", "none")
+                    .attr("stroke-linejoin", "round")
+                    .attr("stroke-linecap", "round")
+                    .attr("stroke-width", 1.5)
+                    .attr("class","Diff-stock")
+                    .on("mouseover", mouseover)
+                    .on("mouseout", Diffmouseout)
+                    .on("click", function(d) {console.log(d[0].symbol)});
+                d3.selectAll('.Diff-stock')
+                    .attr("d", highLine)
+                    .attr("stroke", "orange");
+
+                OHLCstock.exit().remove();
+                Volumestock.exit().remove();
+                Diffstock.exit().remove();
+                callback();
+            }        
+
+            function newOHLCBrush() {
+                var brush = d3.brush()
+                    .on("start", brushstart)
+                    .on("brush", brushed)
+                    .on("end", brushend)
+                    .extent([[0,0],[width, height]]);
+                
+                OHLCBs.push({id: OHLCBs.length, brush: brush});
+
+                function brushstart() {
+                };
+
+                function brushed() {
+                }
+
+                function brushend() {
+                    // Figure out if our latest brush has a selection
+                    var lastBrushID = OHLCBs[OHLCBs.length - 1].id;
+                    var lastBrush = document.getElementById('OHLCBrush-' + lastBrushID);
+                    var selection = d3.brushSelection(lastBrush);
+                    // If it does, that means we need another one
+                    if (selection && selection[0] !== selection[1]) {
+                        newOHLCBrush();
+                    }
+                    // Always draw brushes
+                    renderStocks(getFilteredStocks(), drawBrushesAndLines);
+                }
+            }   
+            
+            function newVolumeBrush() {
+                var brush = d3.brush()
+                    .on("start", brushstart)
+                    .on("brush", brushed)
+                    .on("end", brushend)
+                    .extent([[0,0],[width, height]]);
+                
+                VolumeBs.push({id: VolumeBs.length, brush: brush});
+
+                function brushstart() {
+                };
+
+                function brushed() {
+                }
+
+                function brushend() {
+                    // Figure out if our latest brush has a selection
+                    var lastBrushID = VolumeBs[VolumeBs.length - 1].id;
+                    var lastBrush = document.getElementById('VolumeBrush-' + lastBrushID);
+                    var selection = d3.brushSelection(lastBrush);
+                    // If it does, that means we need another one
+                    if (selection && selection[0] !== selection[1]) {
+                        newVolumeBrush();
+                    }
+                    // Always draw brushes
+                   renderStocks(getFilteredStocks(), drawBrushesAndLines);
+                }
+            } 
+            
+            function newDiffBrush() {
+                var brush = d3.brush()
+                    .on("start", brushstart)
+                    .on("brush", brushed)
+                    .on("end", brushend)
+                    .extent([[0,0],[width, height]]);
+
+                DiffBs.push({id: DiffBs.length, brush: brush});
+                
+                function brushstart() {
+                };
+
+                function brushed() {
+                }
+
+                function brushend() {
+                    // Figure out if our latest brush has a selection
+                    var lastBrushID = DiffBs[DiffBs.length - 1].id;
+                    var lastBrush = document.getElementById('DiffBrush-' + lastBrushID);
+                    var selection = d3.brushSelection(lastBrush);
+                    // If it does, that means we need another one
+                    if (selection && selection[0] !== selection[1]) {
+                        newDiffBrush();
+                    }
+                    // Always draw brushes
+                    renderStocks(getFilteredStocks(), drawBrushesAndLines);
+                }
+            } 
+
+            function drawBrushesAndLines() {
+                var OHLCSelection = OHLCBrushes
+                    .selectAll('.brush')
+                    .data(OHLCBs, function (d){return d.id});	           
+                var VolumeSelection = VolumeBrushes
+                    .selectAll('.brush')
+                    .data(VolumeBs, function (d){return d.id});	          
+                var DiffSelection = DiffBrushes
+                    .selectAll('.brush')
+                    .data(DiffBs, function (d){return d.id});	          
+                
+                OHLCSelection.enter()
+                    .insert("g", '.brush')
+                    .attr('class', 'brush')
+                    .attr('id', function(brush){ return "OHLCBrush-" + brush.id; })
+                    .each(function(brushObject) {
+                        brushObject.brush(d3.select(this));
+                    });
+                VolumeSelection.enter()
+                    .insert("g", '.brush')
+                    .attr('class', 'brush')
+                    .attr('id', function(brush){ return "VolumeBrush-" + brush.id; })
+                    .each(function(brushObject) {
+                        brushObject.brush(d3.select(this));
+                    });
+                DiffSelection.enter()
+                    .insert("g", '.brush')
+                    .attr('class', 'brush')
+                    .attr('id', function(brush){ return "DiffBrush-" + brush.id; })
+                    .each(function(brushObject) {
+                        brushObject.brush(d3.select(this));
+                    });
+        
+                OHLCSelection
+                    .each(function (brushObject){
+                        d3.select(this)
+                            .attr('class', 'brush')
+                            .selectAll('.overlay')
+                            .style('pointer-events', function() {
+                                var brush = brushObject.brush;
+                                if (brushObject.id === OHLCBs.length-1 && brush !== undefined) {
+                                    return 'all';
+                                } else {
+                                    return 'none';
+                                }
+                        });
+                        d3.select(this)
+                            .attr('class', 'brush')
+                            .selectAll('.selection')
+                            .attr('fill-opacity', 0.4)
+                            .attr('fill', "white");
+                    })
+                
+                VolumeSelection
+                    .each(function (brushObject){
+                        d3.select(this)
+                            .attr('class', 'brush')
+                            .selectAll('.overlay')
+                            .style('pointer-events', function() {
+                                var brush = brushObject.brush;
+                                if (brushObject.id === VolumeBs.length-1 && brush !== undefined) {
+                                    return 'all';
+                                } else {
+                                    return 'none';
+                                }
+                        });
+                        d3.select(this)
+                            .attr('class', 'brush')
+                            .selectAll('.selection')
+                            .attr('fill-opacity', 0.4)
+                            .attr('fill', "white");
+                    })
+        
+                DiffSelection
+                    .each(function (brushObject){
+                        d3.select(this)
+                            .attr('class', 'brush')
+                            .selectAll('.overlay')
+                            .style('pointer-events', function() {
+                                var brush = brushObject.brush;
+                                if (brushObject.id === DiffBs.length-1 && brush !== undefined) {
+                                    return 'all';
+                                } else {
+                                    return 'none';
+                                }
+                        });
+                        d3.select(this)
+                            .attr('class', 'brush')
+                            .selectAll('.selection')
+                            .attr('fill-opacity', 0.4)
+                            .attr('fill', "white");
+                    })
+                
+                OHLCSelection.exit()
+                    .remove();
+                VolumeSelection.exit()
+                    .remove();
+                DiffSelection.exit()
+                    .remove();
+            }
+        </script>
+    </body>
+</html>

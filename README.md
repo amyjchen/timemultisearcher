@@ -1,5 +1,10 @@
 # timemultisearcher
 
+### To view without installation:
+- small: https://amyjchen.github.io/timemultisearcher/
+- medium: https://amyjchen.github.io/timemultisearcher/medium.html
+- large: https://amyjchen.github.io/timemultisearcher/big.html
+
 ### To install
 - clone repository
 - change directory to cloned repository `cd timemultisearcher`

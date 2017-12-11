@@ -7,6 +7,6 @@
 - go to http://localhost:8000/
 
 ### to see different sizes of timemultisearcher
-small: http://localhost:8000/
-medium: http://localhost:8000/medium.html
-large: http://localhost:8000/big.html
+- small: http://localhost:8000/
+- medium: http://localhost:8000/medium.html
+- large: http://localhost:8000/big.html
